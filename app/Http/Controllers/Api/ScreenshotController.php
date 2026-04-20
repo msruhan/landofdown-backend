@@ -6,33 +6,62 @@ use App\Http\Controllers\Controller;
 use App\Models\GameMatch;
 use App\Models\MatchPlayer;
 use App\Models\UploadedScreenshot;
+use App\Services\CloudinaryUploader;
+use App\Services\ScreenshotAiParserService;
 use App\Services\ScreenshotOcrService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class ScreenshotController extends Controller
 {
-    public function __construct(private readonly ScreenshotOcrService $ocrService)
+    public function __construct(
+        private readonly ScreenshotOcrService $ocrService,
+        private readonly ScreenshotAiParserService $aiParserService,
+        private readonly CloudinaryUploader $cloudinaryUploader,
+    )
     {
     }
 
     public function upload(Request $request): JsonResponse
     {
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(120);
+        }
+
         $request->validate([
             'screenshot' => 'required|image|max:10240',
         ]);
 
-        $path = $request->file('screenshot')->store('screenshots', 'public');
+        $uploadedFile = $request->file('screenshot');
+        $tmpPath = $uploadedFile->getRealPath();
+        if (!$tmpPath) {
+            return response()->json(['message' => 'Failed reading uploaded file'], 422);
+        }
+
+        $storedPath = $uploadedFile->store('screenshots', 'public');
+        $finalPath = $storedPath;
+
+        if ($this->cloudinaryUploader->isConfigured()) {
+            $uploadResult = $this->cloudinaryUploader->uploadScreenshot($uploadedFile);
+            $finalPath = $uploadResult['file_path'];
+
+            // Keep local disk tidy when Cloudinary is the source of truth.
+            if ($storedPath) {
+                Storage::disk('public')->delete($storedPath);
+            }
+        }
 
         $screenshot = UploadedScreenshot::create([
-            'file_path' => $path,
+            'file_path' => $finalPath,
             'status' => 'pending',
             'uploaded_by' => $request->user()->id,
         ]);
 
-        $absolutePath = storage_path('app/public/'.$path);
-        $ocr = $this->ocrService->parse($absolutePath);
+        // Prefer AI parser for richer extraction; fallback to OCR if AI fails.
+        $aiResult = $this->aiParserService->parse($tmpPath);
+        $ocr = $aiResult['success'] ? $aiResult : $this->ocrService->parse($tmpPath);
 
         $parsedPayload = array_merge([
             'match_date' => now()->toDateString(),
@@ -44,11 +73,14 @@ class ScreenshotController extends Controller
             'players' => [],
         ], $ocr['parsed']);
 
+        $parsedPayload = $this->aiParserService->enrichHeroes($tmpPath, $parsedPayload);
+
         $screenshot->update([
             'status' => $ocr['success'] ? 'parsed' : 'failed',
             'parsed_data' => [
                 'ocr_message' => $ocr['message'],
                 'ocr_text' => $ocr['text'],
+                'parser' => $aiResult['success'] ? 'ai_openrouter' : 'ocr_tesseract',
                 'suggested' => $parsedPayload,
             ],
         ]);

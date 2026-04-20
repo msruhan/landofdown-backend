@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
+use Symfony\Component\HttpFoundation\Response;
 
 class MatchController extends Controller
 {
@@ -123,7 +124,7 @@ class MatchController extends Controller
         return response()->json($match);
     }
 
-    public function screenshot(int $id): BinaryFileResponse
+    public function screenshot(int $id): Response
     {
         $match = GameMatch::findOrFail($id);
         $path = $match->screenshot_path;
@@ -133,7 +134,7 @@ class MatchController extends Controller
         }
 
         if (str_starts_with($path, 'http://') || str_starts_with($path, 'https://')) {
-            abort(404, 'External screenshot URL is not streamable');
+            return redirect()->away($path);
         }
 
         $disk = Storage::disk('public');

@@ -280,6 +280,24 @@ class StatisticsService
                     ->with('player:id,username')
                     ->first();
 
+                $topPlayers = MatchPlayer::where('hero_id', $hero->id)
+                    ->select('player_id')
+                    ->selectRaw('COUNT(*) as matches')
+                    ->selectRaw('AVG(rating) as avg_rating')
+                    ->groupBy('player_id')
+                    ->orderByDesc('matches')
+                    ->orderByDesc('avg_rating')
+                    ->limit(5)
+                    ->with('player:id,username')
+                    ->get()
+                    ->map(fn ($tp) => [
+                        'id' => $tp->player_id,
+                        'username' => $tp->player?->username,
+                        'matches' => (int) $tp->matches,
+                        'avg_rating' => round((float) $tp->avg_rating, 1),
+                    ])
+                    ->toArray();
+
                 return [
                     'id' => $hero->id,
                     'name' => $hero->name,
@@ -295,6 +313,7 @@ class StatisticsService
                         'username' => $bestPlayer->player?->username,
                         'avg_rating' => round((float) $bestPlayer->avg_rating, 1),
                     ] : null,
+                    'top_players' => $topPlayers,
                 ];
             })
             ->toArray();
@@ -311,6 +330,62 @@ class StatisticsService
             ->orderByDesc('usage_count')
             ->get()
             ->map(function ($role) {
+                $mostUsedPlayer = MatchPlayer::where('role_id', $role->id)
+                    ->select('player_id')
+                    ->selectRaw('COUNT(*) as matches')
+                    ->groupBy('player_id')
+                    ->orderByDesc('matches')
+                    ->with('player:id,username')
+                    ->first();
+
+                $mostWinningPlayer = MatchPlayer::where('role_id', $role->id)
+                    ->select('player_id')
+                    ->selectRaw('SUM(CASE WHEN result = \'win\' THEN 1 ELSE 0 END) as wins')
+                    ->selectRaw('COUNT(*) as matches')
+                    ->groupBy('player_id')
+                    ->orderByDesc('wins')
+                    ->orderByDesc('matches')
+                    ->with('player:id,username')
+                    ->first();
+
+                $topUsedPlayers = MatchPlayer::where('role_id', $role->id)
+                    ->select('player_id')
+                    ->selectRaw('COUNT(*) as matches')
+                    ->selectRaw('SUM(CASE WHEN result = \'win\' THEN 1 ELSE 0 END) as wins')
+                    ->groupBy('player_id')
+                    ->orderByDesc('matches')
+                    ->orderByDesc('wins')
+                    ->limit(5)
+                    ->with('player:id,username')
+                    ->get()
+                    ->map(fn ($rp) => [
+                        'id' => $rp->player_id,
+                        'username' => $rp->player?->username,
+                        'matches' => (int) $rp->matches,
+                        'wins' => (int) $rp->wins,
+                        'win_rate' => $rp->matches > 0 ? round(((int) $rp->wins / (int) $rp->matches) * 100, 1) : 0,
+                    ])
+                    ->toArray();
+
+                $topWinningPlayers = MatchPlayer::where('role_id', $role->id)
+                    ->select('player_id')
+                    ->selectRaw('SUM(CASE WHEN result = \'win\' THEN 1 ELSE 0 END) as wins')
+                    ->selectRaw('COUNT(*) as matches')
+                    ->groupBy('player_id')
+                    ->orderByDesc('wins')
+                    ->orderByDesc('matches')
+                    ->limit(5)
+                    ->with('player:id,username')
+                    ->get()
+                    ->map(fn ($rp) => [
+                        'id' => $rp->player_id,
+                        'username' => $rp->player?->username,
+                        'wins' => (int) $rp->wins,
+                        'matches' => (int) $rp->matches,
+                        'win_rate' => $rp->matches > 0 ? round(((int) $rp->wins / (int) $rp->matches) * 100, 1) : 0,
+                    ])
+                    ->toArray();
+
                 $bestPlayers = MatchPlayer::where('role_id', $role->id)
                     ->select('player_id')
                     ->selectRaw('AVG(rating) as avg_rating')
@@ -335,6 +410,22 @@ class StatisticsService
                     'wins' => (int) $role->wins,
                     'win_rate' => $role->usage_count > 0 ? round(($role->wins / $role->usage_count) * 100, 1) : 0,
                     'avg_rating' => $role->avg_rating ? round((float) $role->avg_rating, 1) : null,
+                    'most_used_player' => $mostUsedPlayer ? [
+                        'id' => $mostUsedPlayer->player_id,
+                        'username' => $mostUsedPlayer->player?->username,
+                        'matches' => (int) $mostUsedPlayer->matches,
+                    ] : null,
+                    'most_winning_player' => $mostWinningPlayer ? [
+                        'id' => $mostWinningPlayer->player_id,
+                        'username' => $mostWinningPlayer->player?->username,
+                        'wins' => (int) $mostWinningPlayer->wins,
+                        'matches' => (int) $mostWinningPlayer->matches,
+                        'win_rate' => $mostWinningPlayer->matches > 0
+                            ? round(((int) $mostWinningPlayer->wins / (int) $mostWinningPlayer->matches) * 100, 1)
+                            : 0,
+                    ] : null,
+                    'top_used_players' => $topUsedPlayers,
+                    'top_winning_players' => $topWinningPlayers,
                     'best_players' => $bestPlayers,
                 ];
             })

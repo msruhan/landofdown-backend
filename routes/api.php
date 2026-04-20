@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\BattleController;
 use App\Http\Controllers\Api\HeroController;
 use App\Http\Controllers\Api\MatchController;
 use App\Http\Controllers\Api\PlayerController;
@@ -32,6 +33,7 @@ Route::get('/roles', [RoleController::class, 'index']);
 Route::get('/matches', [MatchController::class, 'index']);
 Route::get('/matches/{id}', [MatchController::class, 'show']);
 Route::get('/matches/{id}/screenshot', [MatchController::class, 'screenshot']);
+Route::post('/battle/ai-randomize', [BattleController::class, 'aiRandomize']);
 
 // Admin protected routes
 Route::middleware('auth:sanctum')->prefix('admin')->group(function () {
