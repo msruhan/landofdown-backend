@@ -24,6 +24,7 @@ class StatisticsService
 
         $topWinners = $this->buildLeaderboard('wins');
         $topMvps = $this->buildLeaderboard('mvp_count');
+        $seasonMvp = $this->buildSeasonMvp();
 
         $winTrend = GameMatch::orderByDesc('match_date')
             ->orderByDesc('id')
@@ -71,6 +72,7 @@ class StatisticsService
             'global_win_rate' => $globalWinRate,
             'top_winners' => $topWinners,
             'top_mvps' => $topMvps,
+            'season_mvp' => $seasonMvp,
             'win_trend' => $winTrend,
             'recent_matches' => $recentMatches,
             'most_used_heroes' => $mostUsedHeroes,
@@ -78,9 +80,12 @@ class StatisticsService
         ];
     }
 
-    private function buildLeaderboard(string $sortBy): array
+    /**
+     * Per-player aggregates for leaderboard / season MVP (players with ≥1 match row).
+     */
+    private function leaderboardStatsQuery()
     {
-        $query = Player::select('players.*')
+        return Player::select('players.*')
             ->selectRaw('COUNT(DISTINCT match_players.id) as matches_played')
             ->selectRaw('SUM(CASE WHEN match_players.result = \'win\' THEN 1 ELSE 0 END) as wins')
             ->selectRaw('SUM(CASE WHEN match_players.result = \'lose\' THEN 1 ELSE 0 END) as losses')
@@ -91,22 +96,72 @@ class StatisticsService
             ->selectRaw('AVG(match_players.assists) as avg_assists')
             ->join('match_players', 'players.id', '=', 'match_players.player_id')
             ->groupBy('players.id');
+    }
 
-        $query->orderByDesc($sortBy === 'mvp_count' ? 'mvp_count' : 'wins');
+    /**
+     * @param  \Illuminate\Database\Eloquent\Model  $p  Player row with aggregated columns
+     * @return array<string, mixed>
+     */
+    private function mapLeaderboardEntry($p): array
+    {
+        $matchesPlayed = (int) $p->matches_played;
+        $wins = (int) $p->wins;
 
-        return $query->limit(5)->get()->map(fn ($p) => [
+        return [
             'player_id' => $p->id,
             'username' => $p->username,
-            'matches_played' => (int) $p->matches_played,
-            'wins' => (int) $p->wins,
+            'matches_played' => $matchesPlayed,
+            'wins' => $wins,
             'losses' => (int) $p->losses,
-            'win_rate' => $p->matches_played > 0 ? round(($p->wins / $p->matches_played) * 100, 1) : 0,
+            'win_rate' => $matchesPlayed > 0 ? round(($wins / $matchesPlayed) * 100, 1) : 0,
             'mvp_count' => (int) $p->mvp_count,
             'avg_rating' => round((float) $p->avg_rating, 1),
             'avg_kills' => round((float) $p->avg_kills, 1),
             'avg_deaths' => round((float) $p->avg_deaths, 1),
             'avg_assists' => round((float) $p->avg_assists, 1),
-        ])->toArray();
+        ];
+    }
+
+    private function buildLeaderboard(string $sortBy): array
+    {
+        $query = $this->leaderboardStatsQuery();
+        $query->orderByDesc($sortBy === 'mvp_count' ? 'mvp_count' : 'wins');
+
+        return $query->limit(5)->get()->map(fn ($p) => $this->mapLeaderboardEntry($p))->toArray();
+    }
+
+    /**
+     * MVP of the season: among players with the highest win count, pick the best average rating
+     * (then MVP count, then win rate as tie-breakers).
+     */
+    private function buildSeasonMvp(): ?array
+    {
+        $rows = $this->leaderboardStatsQuery()->get();
+        if ($rows->isEmpty()) {
+            return null;
+        }
+
+        $maxWins = (int) $rows->max(fn ($p) => (int) $p->wins);
+        $candidates = $rows->filter(fn ($p) => (int) $p->wins === $maxWins);
+
+        $best = $candidates->sort(function ($a, $b) {
+            $ratingCmp = (float) $b->avg_rating <=> (float) $a->avg_rating;
+            if ($ratingCmp !== 0) {
+                return $ratingCmp;
+            }
+
+            $mvpCmp = (int) $b->mvp_count <=> (int) $a->mvp_count;
+            if ($mvpCmp !== 0) {
+                return $mvpCmp;
+            }
+
+            $wrA = (int) $a->matches_played > 0 ? (int) $a->wins / (int) $a->matches_played : 0.0;
+            $wrB = (int) $b->matches_played > 0 ? (int) $b->wins / (int) $b->matches_played : 0.0;
+
+            return $wrB <=> $wrA;
+        })->first();
+
+        return $best ? $this->mapLeaderboardEntry($best) : null;
     }
 
     public function playerStats(int $playerId): array

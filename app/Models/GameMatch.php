@@ -16,6 +16,7 @@ class GameMatch extends Model
         'team_a_name',
         'team_b_name',
         'winner',
+        'patch_id',
         'notes',
         'screenshot_path',
         'created_by',
@@ -51,5 +52,15 @@ class GameMatch extends Model
     public function screenshots(): HasMany
     {
         return $this->hasMany(UploadedScreenshot::class, 'match_id');
+    }
+
+    public function patch(): BelongsTo
+    {
+        return $this->belongsTo(Patch::class);
+    }
+
+    public function draftPicks(): HasMany
+    {
+        return $this->hasMany(DraftPick::class, 'match_id');
     }
 }

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\DraftPick;
 use App\Models\GameMatch;
 use App\Models\MatchPlayer;
 use Illuminate\Http\JsonResponse;
@@ -20,6 +21,7 @@ class MatchController extends Controller
             'matchPlayers.player',
             'matchPlayers.hero',
             'matchPlayers.role',
+            'patch',
         ]);
 
         if ($dateFrom = $request->get('date_from')) {
@@ -49,8 +51,14 @@ class MatchController extends Controller
             'team_a_name' => 'nullable|string|max:255',
             'team_b_name' => 'nullable|string|max:255',
             'winner' => 'required|in:team_a,team_b',
+            'patch_id' => 'nullable|integer|exists:patches,id',
             'notes' => 'nullable|string',
             'screenshot_path' => 'nullable|string|max:500',
+            'draft_picks' => 'nullable|array',
+            'draft_picks.*.team' => 'required_with:draft_picks|in:team_a,team_b',
+            'draft_picks.*.action' => 'required_with:draft_picks|in:pick,ban',
+            'draft_picks.*.order_index' => 'required_with:draft_picks|integer|min:1|max:20',
+            'draft_picks.*.hero_id' => 'nullable|integer|exists:heroes,id',
             'players' => 'required|array|size:10',
             'players.*.player_id' => 'required|exists:players,id',
             'players.*.team' => 'required|in:team_a,team_b',
@@ -77,6 +85,7 @@ class MatchController extends Controller
                 'team_a_name' => $validated['team_a_name'] ?? 'Team A',
                 'team_b_name' => $validated['team_b_name'] ?? 'Team B',
                 'winner' => $validated['winner'],
+                'patch_id' => $validated['patch_id'] ?? null,
                 'notes' => $validated['notes'] ?? null,
                 'screenshot_path' => $validated['screenshot_path'] ?? null,
                 'created_by' => $request->user()?->id,
@@ -100,6 +109,16 @@ class MatchController extends Controller
                 ]);
             }
 
+            foreach ($validated['draft_picks'] ?? [] as $pick) {
+                DraftPick::create([
+                    'match_id' => $match->id,
+                    'team' => $pick['team'],
+                    'action' => $pick['action'],
+                    'order_index' => $pick['order_index'],
+                    'hero_id' => $pick['hero_id'] ?? null,
+                ]);
+            }
+
             return $match;
         });
 
@@ -107,6 +126,8 @@ class MatchController extends Controller
             'matchPlayers.player',
             'matchPlayers.hero',
             'matchPlayers.role',
+            'draftPicks.hero',
+            'patch',
         ]);
 
         return response()->json($match, 201);
@@ -118,6 +139,8 @@ class MatchController extends Controller
             'matchPlayers.player',
             'matchPlayers.hero',
             'matchPlayers.role',
+            'draftPicks.hero',
+            'patch',
             'creator',
         ])->findOrFail($id);
 
@@ -157,8 +180,14 @@ class MatchController extends Controller
             'team_a_name' => 'nullable|string|max:255',
             'team_b_name' => 'nullable|string|max:255',
             'winner' => 'sometimes|required|in:team_a,team_b',
+            'patch_id' => 'nullable|integer|exists:patches,id',
             'notes' => 'nullable|string',
             'screenshot_path' => 'nullable|string|max:500',
+            'draft_picks' => 'nullable|array',
+            'draft_picks.*.team' => 'required_with:draft_picks|in:team_a,team_b',
+            'draft_picks.*.action' => 'required_with:draft_picks|in:pick,ban',
+            'draft_picks.*.order_index' => 'required_with:draft_picks|integer|min:1|max:20',
+            'draft_picks.*.hero_id' => 'nullable|integer|exists:heroes,id',
             'players' => 'sometimes|required|array|size:10',
             'players.*.player_id' => 'required_with:players|exists:players,id',
             'players.*.team' => 'required_with:players|in:team_a,team_b',
@@ -172,8 +201,21 @@ class MatchController extends Controller
         ]);
 
         DB::transaction(function () use ($match, $validated) {
-            $matchData = collect($validated)->except('players')->toArray();
+            $matchData = collect($validated)->except(['players', 'draft_picks'])->toArray();
             $match->update($matchData);
+
+            if (array_key_exists('draft_picks', $validated)) {
+                $match->draftPicks()->delete();
+                foreach ($validated['draft_picks'] ?? [] as $pick) {
+                    DraftPick::create([
+                        'match_id' => $match->id,
+                        'team' => $pick['team'],
+                        'action' => $pick['action'],
+                        'order_index' => $pick['order_index'],
+                        'hero_id' => $pick['hero_id'] ?? null,
+                    ]);
+                }
+            }
 
             if (isset($validated['players'])) {
                 $winner = $validated['winner'] ?? $match->winner;
@@ -203,6 +245,8 @@ class MatchController extends Controller
             'matchPlayers.player',
             'matchPlayers.hero',
             'matchPlayers.role',
+            'draftPicks.hero',
+            'patch',
         ]);
 
         return response()->json($match);

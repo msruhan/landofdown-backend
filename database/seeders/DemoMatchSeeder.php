@@ -2,9 +2,11 @@
 
 namespace Database\Seeders;
 
+use App\Models\DraftPick;
 use App\Models\GameMatch;
 use App\Models\Hero;
 use App\Models\MatchPlayer;
+use App\Models\Patch;
 use App\Models\Player;
 use App\Models\Role;
 use Illuminate\Database\Seeder;
@@ -13,9 +15,10 @@ class DemoMatchSeeder extends Seeder
 {
     public function run(): void
     {
+        // In-game style usernames (MLBB result screen vibe: lowercase, numbers, underscores)
         $playerNames = [
-            'ShadowKing', 'DragonSlayer', 'PhoenixRise', 'StormBreaker', 'NightHawk',
-            'ThunderBolt', 'IceQueen', 'FireLord', 'WindWalker', 'DarkKnight',
+            'wolay70', 'Leadership', 'Bluerose_magic', 'zandal', 'Laperauss',
+            'Nuas', 'Drenvic', 'balabalahard', 'G.O.Y', 'Avalanch',
         ];
 
         // Skill tiers: first 3 are "strong" players, next 4 are "average", last 3 are "weaker"
@@ -38,6 +41,7 @@ class DemoMatchSeeder extends Seeder
         $players = Player::whereIn('username', $playerNames)->get();
         $heroes = Hero::with('role')->get();
         $roles = Role::all();
+        $patches = Patch::orderBy('release_date')->get();
         for ($m = 0; $m < 20; $m++) {
             $matchDate = now()->subDays(rand(0, 60));
             $minutes = rand(10, 25);
@@ -45,12 +49,15 @@ class DemoMatchSeeder extends Seeder
             $duration = sprintf('%d:%02d', $minutes, $seconds);
             $winner = rand(0, 1) ? 'team_a' : 'team_b';
 
+            $patchForMatch = $this->resolvePatch($patches, $matchDate);
+
             $match = GameMatch::create([
                 'match_date' => $matchDate->format('Y-m-d'),
                 'duration' => $duration,
                 'team_a_name' => 'Team A',
                 'team_b_name' => 'Team B',
                 'winner' => $winner,
+                'patch_id' => $patchForMatch?->id,
             ]);
 
             $shuffled = $players->shuffle();
@@ -114,6 +121,62 @@ class DemoMatchSeeder extends Seeder
             foreach ($allMatchPlayers as $mpData) {
                 MatchPlayer::create($mpData);
             }
+
+            $this->seedDraftPicks($match, $allMatchPlayers, $heroes);
+        }
+    }
+
+    private function resolvePatch($patches, $matchDate): ?Patch
+    {
+        if ($patches->isEmpty()) {
+            return null;
+        }
+
+        return $patches
+            ->filter(fn ($p) => $p->release_date <= $matchDate)
+            ->sortByDesc('release_date')
+            ->first() ?? $patches->first();
+    }
+
+    private function seedDraftPicks(GameMatch $match, array $matchPlayers, $heroes): void
+    {
+        $pickedHeroIds = collect($matchPlayers)->pluck('hero_id')->all();
+        $bannedPool = $heroes->whereNotIn('id', $pickedHeroIds)->pluck('id')->shuffle()->take(6)->values();
+
+        $teamAPicks = collect($matchPlayers)->where('team', 'team_a')->values();
+        $teamBPicks = collect($matchPlayers)->where('team', 'team_b')->values();
+
+        $order = 1;
+        foreach ($bannedPool as $idx => $heroId) {
+            DraftPick::create([
+                'match_id' => $match->id,
+                'team' => $idx % 2 === 0 ? 'team_a' : 'team_b',
+                'action' => 'ban',
+                'order_index' => $order++,
+                'hero_id' => $heroId,
+            ]);
+        }
+
+        $pickSequence = [
+            ['team_a', 0], ['team_b', 0], ['team_b', 1],
+            ['team_a', 1], ['team_a', 2], ['team_b', 2],
+            ['team_b', 3], ['team_a', 3], ['team_a', 4], ['team_b', 4],
+        ];
+
+        foreach ($pickSequence as [$team, $slot]) {
+            $source = $team === 'team_a' ? $teamAPicks : $teamBPicks;
+            $mp = $source[$slot] ?? null;
+            if (! $mp) {
+                continue;
+            }
+
+            DraftPick::create([
+                'match_id' => $match->id,
+                'team' => $team,
+                'action' => 'pick',
+                'order_index' => $order++,
+                'hero_id' => $mp['hero_id'],
+            ]);
         }
     }
 

@@ -19,4 +19,9 @@ class Hero extends Model
     {
         return $this->hasMany(MatchPlayer::class);
     }
+
+    public function draftPicks(): HasMany
+    {
+        return $this->hasMany(DraftPick::class);
+    }
 }

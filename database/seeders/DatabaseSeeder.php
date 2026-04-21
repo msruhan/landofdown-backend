@@ -16,6 +16,7 @@ class DatabaseSeeder extends Seeder
             HeroSeeder::class,
             HeroCatalogSeeder::class,
             AdminSeeder::class,
+            PatchSeeder::class,
             DemoMatchSeeder::class,
         ]);
     }
