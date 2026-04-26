@@ -3,16 +3,20 @@
 namespace App\Services;
 
 use App\Models\Patch;
+use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class MetaTrackerService
 {
     public function listPatches(): array
     {
+        $this->syncWeeklySeasons();
+
         return Patch::query()
             ->leftJoin('game_matches', 'patches.id', '=', 'game_matches.patch_id')
             ->select('patches.*')
             ->selectRaw('COUNT(game_matches.id) as match_count')
+            ->where('patches.version', 'like', 'Season %')
             ->groupBy('patches.id')
             ->orderByDesc('patches.release_date')
             ->get()
@@ -29,6 +33,8 @@ class MetaTrackerService
 
     public function overview(?int $patchId): array
     {
+        $this->syncWeeklySeasons();
+
         $patches = Patch::orderByDesc('release_date')->get();
 
         if (! $patchId) {
@@ -213,5 +219,70 @@ class MetaTrackerService
             'release_date' => $patch->release_date?->format('Y-m-d'),
             'notes' => $patch->notes,
         ];
+    }
+
+    private function syncWeeklySeasons(): void
+    {
+        $baseMonday = Carbon::create(2026, 4, 20)->startOfDay();
+
+        $maxMatchDate = DB::table('game_matches')->max('match_date');
+        $todayWeekStart = Carbon::today()->startOfWeek(Carbon::MONDAY);
+        $latestMatchWeekStart = $maxMatchDate
+            ? Carbon::parse($maxMatchDate)->startOfWeek(Carbon::MONDAY)
+            : null;
+        $endDate = $latestMatchWeekStart && $latestMatchWeekStart->gt($todayWeekStart)
+            ? $latestMatchWeekStart
+            : $todayWeekStart;
+
+        if ($endDate->lt($baseMonday)) {
+            $endDate = $baseMonday->copy();
+        }
+
+        $seasonPatchIdByIndex = [];
+        $seasonVersions = [];
+        $cursor = $baseMonday->copy();
+        $index = 1;
+
+        while ($cursor->lte($endDate)) {
+            $seasonStart = $cursor->copy();
+            $seasonEnd = $cursor->copy()->addDays(4);
+            $version = "Season {$index}";
+            $seasonVersions[] = $version;
+
+            $patch = Patch::updateOrCreate(
+                ['version' => $version],
+                [
+                    'name' => $seasonStart->format('d M Y').' - '.$seasonEnd->format('d M Y'),
+                    'release_date' => $seasonStart->toDateString(),
+                    'notes' => 'Auto-generated weekly season (Mon-Fri).',
+                ]
+            );
+
+            $seasonPatchIdByIndex[$index] = $patch->id;
+            $cursor->addWeek();
+            $index++;
+        }
+
+        // Keep only auto-generated season rows to avoid old patch names in selector.
+        Patch::query()->whereNotIn('version', $seasonVersions)->delete();
+
+        $matches = DB::table('game_matches')->select('id', 'match_date')->get();
+        foreach ($matches as $match) {
+            if (! $match->match_date) {
+                continue;
+            }
+
+            $date = Carbon::parse($match->match_date)->startOfWeek(Carbon::MONDAY);
+            if ($date->lt($baseMonday)) {
+                continue;
+            }
+
+            $seasonIndex = $baseMonday->diffInWeeks($date) + 1;
+            $patchId = $seasonPatchIdByIndex[$seasonIndex] ?? null;
+
+            if ($patchId) {
+                DB::table('game_matches')->where('id', $match->id)->update(['patch_id' => $patchId]);
+            }
+        }
     }
 }

@@ -11,12 +11,14 @@ use Illuminate\Validation\ValidationException;
 class BattleController extends Controller
 {
     /**
-     * Generate AI-assisted battle lanes using OpenRouter (OpenAI-compatible).
+     * Generate AI-assisted battle lanes using Google Gemini.
      *
      * @throws ValidationException
      */
     public function aiRandomize(Request $request): JsonResponse
     {
+        @set_time_limit(90);
+
         $validated = $request->validate([
             'prompt' => 'required|string|min:3|max:2000',
             'team_a_name' => 'nullable|string|max:120',
@@ -32,14 +34,14 @@ class BattleController extends Controller
             'instruction_history.*' => 'string|max:500',
         ]);
 
-        $apiKey = (string) config('services.openrouter.api_key');
+        $apiKey = (string) config('services.gemini.api_key');
         if ($apiKey === '') {
             return response()->json([
-                'message' => 'OpenRouter API key is not configured on server.',
+                'message' => 'Gemini API key is not configured on server.',
             ], 503);
         }
 
-        $model = (string) config('services.openrouter.model', 'openai/gpt-4o-mini');
+        $model = (string) config('services.gemini.model', 'gemini-2.0-flash');
         $lanes = ['jungle', 'exp', 'mid', 'gold', 'roam'];
 
         $players = collect($validated['players'])
@@ -86,41 +88,39 @@ TXT;
         ];
 
         $response = Http::timeout(45)
-            ->withHeaders([
-                'Authorization' => "Bearer {$apiKey}",
-                'HTTP-Referer' => (string) config('app.url', 'http://localhost'),
-                'X-Title' => 'MLBB Stats Battle AI',
-            ])
-            ->post('https://openrouter.ai/api/v1/chat/completions', [
-                'model' => $model,
-                'response_format' => [
-                    'type' => 'json_object',
+            ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}", [
+                'contents' => [
+                    [
+                        'parts' => [
+                            ['text' => $systemInstruction."\n\nInput:\n".json_encode($userPayload, JSON_PRETTY_PRINT)],
+                        ],
+                    ],
                 ],
-                'temperature' => 0.3,
-                'messages' => [
-                    ['role' => 'system', 'content' => $systemInstruction],
-                    ['role' => 'user', 'content' => "Input:\n".json_encode($userPayload, JSON_PRETTY_PRINT)],
+                'generationConfig' => [
+                    'temperature' => 0.3,
+                    'maxOutputTokens' => 2048,
+                    'responseMimeType' => 'application/json',
                 ],
             ]);
 
         if (!$response->successful()) {
             return response()->json([
-                'message' => 'OpenRouter request failed.',
+                'message' => 'Gemini request failed.',
                 'details' => $response->json(),
             ], 502);
         }
 
-        $text = data_get($response->json(), 'choices.0.message.content');
+        $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
         if (!is_string($text) || trim($text) === '') {
             return response()->json([
-                'message' => 'OpenRouter response is empty.',
+                'message' => 'Gemini response is empty.',
             ], 502);
         }
 
         $decoded = $this->decodeJsonFromText($text);
         if (!is_array($decoded)) {
             return response()->json([
-                'message' => 'OpenRouter response is not valid JSON.',
+                'message' => 'Gemini response is not valid JSON.',
                 'raw' => $text,
             ], 502);
         }

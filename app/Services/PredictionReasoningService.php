@@ -18,7 +18,9 @@ class PredictionReasoningService
      */
     public function generate(array $teamA, array $teamB, ?array $prediction = null): array
     {
-        $apiKey = (string) config('services.openrouter.api_key');
+        @set_time_limit(90);
+
+        $apiKey = (string) config('services.gemini.api_key');
 
         $context = [
             'team_a' => [
@@ -36,7 +38,7 @@ class PredictionReasoningService
             return $this->fallbackReasoning($context);
         }
 
-        $model = (string) config('services.openrouter.model', 'openai/gpt-4o-mini');
+        $model = (string) config('services.gemini.model', 'gemini-2.0-flash');
 
         $systemInstruction = <<<'TXT'
 You are a Mobile Legends: Bang Bang esports analyst.
@@ -67,18 +69,18 @@ TXT;
 
         try {
             $response = Http::timeout(45)
-                ->withHeaders([
-                    'Authorization' => "Bearer {$apiKey}",
-                    'HTTP-Referer' => (string) config('app.url', 'http://localhost'),
-                    'X-Title' => 'MLBB Stats Prediction Reasoner',
-                ])
-                ->post('https://openrouter.ai/api/v1/chat/completions', [
-                    'model' => $model,
-                    'response_format' => ['type' => 'json_object'],
-                    'temperature' => 0.5,
-                    'messages' => [
-                        ['role' => 'system', 'content' => $systemInstruction],
-                        ['role' => 'user', 'content' => "Context:\n".json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)],
+                ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}", [
+                    'contents' => [
+                        [
+                            'parts' => [
+                                ['text' => $systemInstruction."\n\nContext:\n".json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)],
+                            ],
+                        ],
+                    ],
+                    'generationConfig' => [
+                        'temperature' => 0.5,
+                        'maxOutputTokens' => 1024,
+                        'responseMimeType' => 'application/json',
                     ],
                 ]);
         } catch (\Throwable $e) {
@@ -86,10 +88,10 @@ TXT;
         }
 
         if (! $response->successful()) {
-            return $this->fallbackReasoning($context, 'OpenRouter returned '.$response->status());
+            return $this->fallbackReasoning($context, 'Gemini returned '.$response->status());
         }
 
-        $text = data_get($response->json(), 'choices.0.message.content');
+        $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
         if (! is_string($text) || trim($text) === '') {
             return $this->fallbackReasoning($context, 'Empty AI response');
         }

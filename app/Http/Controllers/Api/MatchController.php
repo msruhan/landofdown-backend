@@ -36,6 +36,10 @@ class MatchController extends Controller
             $query->whereHas('matchPlayers', fn ($q) => $q->where('player_id', $playerId));
         }
 
+        if ($patchId = $request->get('patch_id')) {
+            $query->where('patch_id', $patchId);
+        }
+
         $matches = $query->orderByDesc('match_date')
             ->orderByDesc('id')
             ->paginate($request->get('per_page', 15));
