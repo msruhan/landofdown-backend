@@ -80,7 +80,7 @@ class ScreenshotController extends Controller
             'parsed_data' => [
                 'ocr_message' => $ocr['message'],
                 'ocr_text' => $ocr['text'],
-                'parser' => $aiResult['success'] ? 'ai_openrouter' : 'ocr_tesseract',
+                'parser' => $aiResult['success'] ? 'ai_openai' : 'ocr_tesseract',
                 'suggested' => $parsedPayload,
             ],
         ]);

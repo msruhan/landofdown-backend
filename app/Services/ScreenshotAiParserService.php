@@ -10,7 +10,7 @@ class ScreenshotAiParserService
 {
     public function isConfigured(): bool
     {
-        return (string) config('services.openrouter.api_key') !== '';
+        return (string) config('services.openai.api_key') !== '';
     }
 
     public function parse(string $absoluteImagePath): array
@@ -27,7 +27,7 @@ class ScreenshotAiParserService
         if (!$this->isConfigured()) {
             return [
                 'success' => false,
-                'message' => 'OpenRouter API key is not configured',
+                'message' => 'OpenAI API key is not configured',
                 'text' => '',
                 'parsed' => [],
             ];
@@ -84,16 +84,14 @@ Rules:
 - If team names are unknown, use "Team A" and "Team B".
 TXT;
 
-            $apiKey = (string) config('services.openrouter.api_key');
-            $model = (string) config('services.openrouter.vision_model', config('services.openrouter.model', 'openai/gpt-4o-mini'));
+            $apiKey = (string) config('services.openai.api_key');
+            $model = (string) config('services.openai.vision_model', config('services.openai.model', 'gpt-4o-mini'));
+            $openaiBase = (string) config('services.openai.base_url', 'https://api.openai.com/v1');
+            $chatUrl = rtrim($openaiBase, '/').'/chat/completions';
 
             $response = Http::timeout(90)
-                ->withHeaders([
-                    'Authorization' => "Bearer {$apiKey}",
-                    'HTTP-Referer' => (string) config('app.url', 'http://localhost'),
-                    'X-Title' => 'MLBB Stats Screenshot Parser',
-                ])
-                ->post('https://openrouter.ai/api/v1/chat/completions', [
+                ->withToken($apiKey)
+                ->post($chatUrl, [
                     'model' => $model,
                     'temperature' => 0.1,
                     'max_tokens' => 1200,
@@ -112,7 +110,7 @@ TXT;
             if (!$response->successful()) {
                 return [
                     'success' => false,
-                    'message' => 'OpenRouter screenshot parsing failed',
+                    'message' => 'OpenAI screenshot parsing failed',
                     'text' => '',
                     'parsed' => [],
                     'details' => $response->json(),
@@ -123,7 +121,7 @@ TXT;
             if (trim($text) === '') {
                 return [
                     'success' => false,
-                    'message' => 'OpenRouter returned empty content',
+                    'message' => 'OpenAI returned empty content',
                     'text' => '',
                     'parsed' => [],
                 ];
@@ -133,7 +131,7 @@ TXT;
             if (!is_array($decoded)) {
                 return [
                     'success' => false,
-                    'message' => 'OpenRouter returned invalid JSON',
+                    'message' => 'OpenAI returned invalid JSON',
                     'text' => $text,
                     'parsed' => [],
                 ];
@@ -191,8 +189,10 @@ TXT;
 
             $mimeType = $this->guessMimeType($absoluteImagePath);
             $dataUrl = 'data:'.$mimeType.';base64,'.base64_encode($imageData);
-            $apiKey = (string) config('services.openrouter.api_key');
-            $model = (string) config('services.openrouter.vision_model', config('services.openrouter.model', 'openai/gpt-4o-mini'));
+            $apiKey = (string) config('services.openai.api_key');
+            $model = (string) config('services.openai.vision_model', config('services.openai.model', 'gpt-4o-mini'));
+            $openaiBase = (string) config('services.openai.base_url', 'https://api.openai.com/v1');
+            $chatUrl = rtrim($openaiBase, '/').'/chat/completions';
 
             $heroCatalog = Hero::query()->orderBy('name')->pluck('name')->all();
             $playerSkeleton = array_values(array_map(function ($player): array {
@@ -221,12 +221,8 @@ TXT;
                 "Allowed hero catalog:\n".json_encode($heroCatalog, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
             $response = Http::timeout(90)
-                ->withHeaders([
-                    'Authorization' => "Bearer {$apiKey}",
-                    'HTTP-Referer' => (string) config('app.url', 'http://localhost'),
-                    'X-Title' => 'MLBB Hero Icon Enricher',
-                ])
-                ->post('https://openrouter.ai/api/v1/chat/completions', [
+                ->withToken($apiKey)
+                ->post($chatUrl, [
                     'model' => $model,
                     'temperature' => 0,
                     'max_tokens' => 900,

@@ -21,4 +21,8 @@ touch database/database.sqlite
 php artisan config:clear
 php artisan migrate --force
 
-exec php artisan serve --host=0.0.0.0 --port=8000
+chown -R www-data:www-data storage bootstrap/cache database
+chmod -R ug+rwX storage bootstrap/cache database
+
+PORT="${PORT:-8000}"
+exec php artisan serve --host=0.0.0.0 --port="$PORT"

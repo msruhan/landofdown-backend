@@ -42,15 +42,11 @@ return [
         'folder' => env('CLOUDINARY_FOLDER', 'mlbb-stats/screenshots'),
     ],
 
-    'gemini' => [
-        'api_key' => env('GEMINI_API_KEY'),
-        'model' => env('GEMINI_MODEL', 'gemini-2.0-flash'),
-    ],
-
-    'openrouter' => [
-        'api_key' => env('OPENROUTER_API_KEY'),
-        'model' => env('OPENROUTER_MODEL', 'openai/gpt-4o-mini'),
-        'vision_model' => env('OPENROUTER_VISION_MODEL', env('OPENROUTER_MODEL', 'openai/gpt-4o-mini')),
+    'openai' => [
+        'api_key' => env('OPENAI_API_KEY'),
+        'base_url' => rtrim((string) env('OPENAI_BASE_URL', 'https://api.openai.com/v1'), '/'),
+        'model' => env('OPENAI_MODEL', 'gpt-4o-mini'),
+        'vision_model' => env('OPENAI_VISION_MODEL', env('OPENAI_MODEL', 'gpt-4o-mini')),
     ],
 
 ];

@@ -20,7 +20,7 @@ class PredictionReasoningService
     {
         @set_time_limit(90);
 
-        $apiKey = (string) config('services.gemini.api_key');
+        $apiKey = (string) config('services.openai.api_key');
 
         $context = [
             'team_a' => [
@@ -38,7 +38,9 @@ class PredictionReasoningService
             return $this->fallbackReasoning($context);
         }
 
-        $model = (string) config('services.gemini.model', 'gemini-2.0-flash');
+        $model = (string) config('services.openai.model', 'gpt-4o-mini');
+        $openaiBase = (string) config('services.openai.base_url', 'https://api.openai.com/v1');
+        $chatUrl = rtrim($openaiBase, '/').'/chat/completions';
 
         $systemInstruction = <<<'TXT'
 You are a Mobile Legends: Bang Bang esports analyst.
@@ -69,30 +71,27 @@ TXT;
 
         try {
             $response = Http::timeout(45)
-                ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}", [
-                    'contents' => [
-                        [
-                            'parts' => [
-                                ['text' => $systemInstruction."\n\nContext:\n".json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)],
-                            ],
-                        ],
+                ->withToken($apiKey)
+                ->post($chatUrl, [
+                    'model' => $model,
+                    'messages' => [
+                        ['role' => 'system', 'content' => $systemInstruction],
+                        ['role' => 'user', 'content' => "Context:\n".json_encode($context, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)],
                     ],
-                    'generationConfig' => [
-                        'temperature' => 0.5,
-                        'maxOutputTokens' => 1024,
-                        'responseMimeType' => 'application/json',
-                    ],
+                    'response_format' => ['type' => 'json_object'],
+                    'temperature' => 0.5,
+                    'max_tokens' => 1024,
                 ]);
         } catch (\Throwable $e) {
             return $this->fallbackReasoning($context, $e->getMessage());
         }
 
         if (! $response->successful()) {
-            return $this->fallbackReasoning($context, 'Gemini returned '.$response->status());
+            return $this->fallbackReasoning($context, 'OpenAI returned '.$response->status());
         }
 
-        $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
-        if (! is_string($text) || trim($text) === '') {
+        $text = (string) data_get($response->json(), 'choices.0.message.content', '');
+        if (trim($text) === '') {
             return $this->fallbackReasoning($context, 'Empty AI response');
         }
 

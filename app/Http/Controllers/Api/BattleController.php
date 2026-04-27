@@ -11,7 +11,7 @@ use Illuminate\Validation\ValidationException;
 class BattleController extends Controller
 {
     /**
-     * Generate AI-assisted battle lanes using Google Gemini.
+     * Generate AI-assisted battle lanes using the OpenAI API.
      *
      * @throws ValidationException
      */
@@ -34,14 +34,16 @@ class BattleController extends Controller
             'instruction_history.*' => 'string|max:500',
         ]);
 
-        $apiKey = (string) config('services.gemini.api_key');
+        $apiKey = (string) config('services.openai.api_key');
         if ($apiKey === '') {
             return response()->json([
-                'message' => 'Gemini API key is not configured on server.',
+                'message' => 'OpenAI API key is not configured on server.',
             ], 503);
         }
 
-        $model = (string) config('services.gemini.model', 'gemini-2.0-flash');
+        $model = (string) config('services.openai.model', 'gpt-4o-mini');
+        $openaiBase = (string) config('services.openai.base_url', 'https://api.openai.com/v1');
+        $chatUrl = rtrim($openaiBase, '/').'/chat/completions';
         $lanes = ['jungle', 'exp', 'mid', 'gold', 'roam'];
 
         $players = collect($validated['players'])
@@ -88,39 +90,36 @@ TXT;
         ];
 
         $response = Http::timeout(45)
-            ->post("https://generativelanguage.googleapis.com/v1beta/models/{$model}:generateContent?key={$apiKey}", [
-                'contents' => [
-                    [
-                        'parts' => [
-                            ['text' => $systemInstruction."\n\nInput:\n".json_encode($userPayload, JSON_PRETTY_PRINT)],
-                        ],
-                    ],
+            ->withToken($apiKey)
+            ->post($chatUrl, [
+                'model' => $model,
+                'messages' => [
+                    ['role' => 'system', 'content' => $systemInstruction],
+                    ['role' => 'user', 'content' => "Input:\n".json_encode($userPayload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)],
                 ],
-                'generationConfig' => [
-                    'temperature' => 0.3,
-                    'maxOutputTokens' => 2048,
-                    'responseMimeType' => 'application/json',
-                ],
+                'response_format' => ['type' => 'json_object'],
+                'temperature' => 0.3,
+                'max_tokens' => 2048,
             ]);
 
         if (!$response->successful()) {
             return response()->json([
-                'message' => 'Gemini request failed.',
+                'message' => 'OpenAI request failed.',
                 'details' => $response->json(),
             ], 502);
         }
 
-        $text = data_get($response->json(), 'candidates.0.content.parts.0.text');
-        if (!is_string($text) || trim($text) === '') {
+        $text = (string) data_get($response->json(), 'choices.0.message.content', '');
+        if (trim($text) === '') {
             return response()->json([
-                'message' => 'Gemini response is empty.',
+                'message' => 'OpenAI response is empty.',
             ], 502);
         }
 
         $decoded = $this->decodeJsonFromText($text);
         if (!is_array($decoded)) {
             return response()->json([
-                'message' => 'Gemini response is not valid JSON.',
+                'message' => 'OpenAI response is not valid JSON.',
                 'raw' => $text,
             ], 502);
         }
